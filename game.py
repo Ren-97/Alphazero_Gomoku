@@ -1,10 +1,13 @@
-# -*- coding: utf-8 -*-
 """
-@author: Junxiao Song
+The Board class defines the state and rules of the game.
+The Game class manages the gameplay flow between two players and generates training data when needed.
 """
 
-from __future__ import print_function
+import logging
 import numpy as np
+
+
+logger = logging.getLogger(__name__)
 
 
 class Board(object):
@@ -13,19 +16,15 @@ class Board(object):
     def __init__(self, **kwargs):
         self.width = int(kwargs.get('width', 8))
         self.height = int(kwargs.get('height', 8))
-        # board states stored as a dict,
-        # key: move as location on the board,
-        # value: player as pieces type
-        self.states = {}
-        # need how many pieces in a row to win
+        self.states = {} # {location:player_id}
         self.n_in_row = int(kwargs.get('n_in_row', 5))
-        self.players = [1, 2]  # player1 and player2
+        self.players = [1, 2]
 
     def init_board(self, start_player=0):
         if self.width < self.n_in_row or self.height < self.n_in_row:
             raise Exception('board width and height can not be '
                             'less than {}'.format(self.n_in_row))
-        self.current_player = self.players[start_player]  # start player
+        self.current_player = self.players[start_player]  
         # keep available moves in a list
         self.availables = list(range(self.width * self.height))
         self.states = {}
@@ -54,7 +53,7 @@ class Board(object):
         return move
 
     def current_state(self):
-        """return the board state from the perspective of the current player.
+        """
         state shape: 4*width*height
         """
 
@@ -71,7 +70,7 @@ class Board(object):
             square_state[2][self.last_move // self.width,
                             self.last_move % self.height] = 1.0
         if len(self.states) % 2 == 0:
-            square_state[3][:, :] = 1.0  # indicate the colour to play
+            square_state[3][:, :] = 1.0  # all ones for odd turn
         return square_state[:, ::-1, :]
 
     def do_move(self, move):
@@ -89,29 +88,34 @@ class Board(object):
         states = self.states
         n = self.n_in_row
 
-        moved = list(set(range(width * height)) - set(self.availables))
-        if len(moved) < self.n_in_row *2-1:
+        if len(states) < n * 2 - 1:
             return False, -1
 
-        for m in moved:
-            h = m // width
-            w = m % width
-            player = states[m]
+        m = self.last_move
+        if m == -1:
+            return False, -1
+        player = states[m]
 
-            if (w in range(width - n + 1) and
-                    len(set(states.get(i, -1) for i in range(m, m + n))) == 1):
-                return True, player
+        h0 = m // width
+        w0 = m % width
 
-            if (h in range(height - n + 1) and
-                    len(set(states.get(i, -1) for i in range(m, m + n * width, width))) == 1):
-                return True, player
+        def count_dir(dh: int, dw: int) -> int:
+            cnt = 0
+            h, w = h0 + dh, w0 + dw
+            while 0 <= h < height and 0 <= w < width:
+                mm = h * width + w
+                if states.get(mm) != player:
+                    break
+                cnt += 1
+                if cnt >= n - 1:
+                    break
+                h += dh
+                w += dw
+            return cnt
 
-            if (w in range(width - n + 1) and h in range(height - n + 1) and
-                    len(set(states.get(i, -1) for i in range(m, m + n * (width + 1), width + 1))) == 1):
-                return True, player
-
-            if (w in range(n - 1, width) and h in range(height - n + 1) and
-                    len(set(states.get(i, -1) for i in range(m, m + n * (width - 1), width - 1))) == 1):
+        for dh, dw in ((0, 1), (1, 0), (1, 1), (1, -1)):
+            total = 1 + count_dir(dh, dw) + count_dir(-dh, -dw)
+            if total >= n:
                 return True, player
 
         return False, -1
@@ -140,24 +144,26 @@ class Game(object):
         width = board.width
         height = board.height
 
-        print("Player", player1, "with X".rjust(3))
-        print("Player", player2, "with O".rjust(3))
-        print()
-        for x in range(width):
-            print("{0:8}".format(x), end='')
-        print('\r\n')
+        lines = []
+        lines.append(f"Player {player1} with X")
+        lines.append(f"Player {player2} with O")
+        lines.append("")
+        lines.append("".join("{0:8}".format(x) for x in range(width)))
+        lines.append("")
         for i in range(height - 1, -1, -1):
-            print("{0:4d}".format(i), end='')
+            row = ["{0:4d}".format(i)]
             for j in range(width):
                 loc = i * width + j
                 p = board.states.get(loc, -1)
                 if p == player1:
-                    print('X'.center(8), end='')
+                    row.append("X".center(8))
                 elif p == player2:
-                    print('O'.center(8), end='')
+                    row.append("O".center(8))
                 else:
-                    print('_'.center(8), end='')
-            print('\r\n\r\n')
+                    row.append("_".center(8))
+            lines.append("".join(row))
+            lines.append("")
+        logger.info("\n%s", "\n".join(lines))
 
     def start_play(self, player1, player2, start_player=0, is_shown=1):
         """start a game between two players"""
@@ -182,9 +188,9 @@ class Game(object):
             if end:
                 if is_shown:
                     if winner != -1:
-                        print("Game end. Winner is", players[winner])
+                        logger.info("Game end. Winner is %s", players[winner])
                     else:
-                        print("Game end. Tie")
+                        logger.info("Game end. Tie")
                 return winner
 
     def start_self_play(self, player, is_shown=0, temp=1e-3):
@@ -217,7 +223,7 @@ class Game(object):
                 player.reset_player()
                 if is_shown:
                     if winner != -1:
-                        print("Game end. Winner is player:", winner)
+                        logger.info("Game end. Winner is player: %s", winner)
                     else:
-                        print("Game end. Tie")
+                        logger.info("Game end. Tie")
                 return winner, zip(states, mcts_probs, winners_z)
