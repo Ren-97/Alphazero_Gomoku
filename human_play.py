@@ -5,7 +5,7 @@ human VS mcts_alphaZero
 import logging
 from game import Board, Game
 from mcts_alphaZero import MCTSPlayer
-from policy_value_net_pytorch import PolicyValueNet
+from policy_value_net import PolicyValueNet
 from az_logging import setup_logging
 
 

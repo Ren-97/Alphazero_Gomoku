@@ -20,7 +20,7 @@ from az_logging import setup_logging
 from game import Board
 from mcts_alphaZero import MCTSPlayer
 from mcts_pure import MCTSPlayer as MCTS_Pure
-from policy_value_net_pytorch import PolicyValueNet
+from policy_value_net import PolicyValueNet
 
 
 PRESETS = {

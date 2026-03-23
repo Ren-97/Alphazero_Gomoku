@@ -6,13 +6,14 @@ import logging
 import os
 import random
 import time
+import argparse
 import numpy as np
 from collections import defaultdict, deque
 import torch
 from game import Board, Game
 from mcts_pure import MCTSPlayer as MCTS_Pure
 from mcts_alphaZero import MCTSPlayer
-from policy_value_net_pytorch import PolicyValueNet 
+from policy_value_net import PolicyValueNet 
 from az_logging import setup_logging
 
 
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class TrainPipeline():
-    def __init__(self, init_model=None):
+    def __init__(self, init_model=None, use_gpu: bool | None = None):
         # params of the board and the game
         self.board_width = 6
         self.board_height = 6
@@ -40,7 +41,7 @@ class TrainPipeline():
         self.learn_rate = 2e-3
         self.lr_multiplier = 1.0  # adaptively adjust the learning rate based on KL
         self.temp = 1.0  # the temperature param
-        self.n_playout = 10  #40 # num of simulations for each move
+        self.n_playout = 10  #400 # num of simulations for each move
         self.c_puct = 5 # Exploration Coefficient (PUCT:Predictor + Upper Confidence Bound applied to Trees)
         self.buffer_size = 10000
         self.batch_size = 512  # mini-batch size for training
@@ -74,6 +75,14 @@ class TrainPipeline():
         self.last_entropy = None
         self.last_kl = None
 
+        # Device selection (GPU if available unless explicitly disabled).
+        if use_gpu is None:
+            self.use_gpu = bool(torch.cuda.is_available())
+        else:
+            self.use_gpu = bool(use_gpu) and bool(torch.cuda.is_available())
+        if (use_gpu is True) and (not torch.cuda.is_available()):
+            logger.warning("use_gpu=True but CUDA not available. Falling back to CPU.")
+
         # Initialization modes:
         # - If init_model is provided (non-empty path): load weights from that file.
         # - Otherwise: create a fresh net and (if available) resume from latest checkpoint.
@@ -83,12 +92,14 @@ class TrainPipeline():
                 self.board_width,
                 self.board_height,
                 model_file=init_model,
+                use_gpu=self.use_gpu,
                 base_lr=self.learn_rate,
             )
         else:
             self.policy_value_net = PolicyValueNet(
                 self.board_width,
                 self.board_height,
+                use_gpu=self.use_gpu,
                 base_lr=self.learn_rate,
             )
             self._try_resume_from_checkpoint()
@@ -143,7 +154,8 @@ class TrainPipeline():
             logger.exception("Failed to resume from checkpoint: %s", self.latest_checkpoint_path)
 
     def get_equi_data(self, play_data):
-        """augment the data set by rotation and flipping
+        """
+        augment the data set by rotation and flipping
         play_data: [(state, mcts_prob, winner_z), ..., ...]
         """
         extend_data = []
@@ -261,6 +273,7 @@ class TrainPipeline():
             self.board_width,
             self.board_height,
             model_file=self.best_policy_path,
+            use_gpu=self.use_gpu,
         )
         best_mcts_player = MCTSPlayer(best_policy.policy_value_fn,
                                       c_puct=self.c_puct,
@@ -427,5 +440,17 @@ class TrainPipeline():
 
 if __name__ == '__main__':
     setup_logging(log_file="logs/train.log")
-    training_pipeline = TrainPipeline()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--init-model", default=None, help="Optional path to a .pth model to initialize from.")
+    parser.add_argument("--use-gpu", action="store_true", help="Use CUDA if available.")
+    parser.add_argument("--cpu", action="store_true", help="Force CPU even if CUDA is available.")
+    args = parser.parse_args()
+
+    use_gpu = None
+    if args.cpu:
+        use_gpu = False
+    elif args.use_gpu:
+        use_gpu = True
+
+    training_pipeline = TrainPipeline(init_model=args.init_model, use_gpu=use_gpu)
     training_pipeline.run()
