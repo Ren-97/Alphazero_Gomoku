@@ -204,8 +204,6 @@ class MCTSPlayer(object):
             else:
                 move = np.random.choice(acts, p=probs)
                 self.mcts.update_with_move(-1)
-                location = board.move_to_location(move)
-                logger.info("AI move: %d,%d", location[0], location[1])
 
             if return_prob:
                 return move, move_probs

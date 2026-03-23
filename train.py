@@ -7,6 +7,9 @@ import os
 import random
 import time
 import argparse
+import shutil
+from pathlib import Path
+import sys
 import numpy as np
 from collections import defaultdict, deque
 import torch
@@ -15,13 +18,55 @@ from mcts_pure import MCTSPlayer as MCTS_Pure
 from mcts_alphaZero import MCTSPlayer
 from policy_value_net import PolicyValueNet 
 from az_logging import setup_logging
+from az_metrics import MetricsWriter, DEFAULT_METRICS_FIELDS
 
 
 logger = logging.getLogger(__name__)
 
 
+def _archive_and_clear_outputs(*, archive_root: str = "runs") -> str:
+    """
+    Move existing training outputs into a fresh archive folder.
+    Returns the archive directory path.
+    """
+    ts = time.strftime("%Y%m%d-%H%M%S", time.localtime())
+    archive_dir = Path(archive_root) / f"archive_{ts}"
+    archive_dir.mkdir(parents=True, exist_ok=False)
+
+    def move_path(p: Path, rel_base: Path) -> None:
+        if not p.exists():
+            return
+        rel = p.relative_to(rel_base)
+        dest = archive_dir / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(p), str(dest))
+
+    root = Path(".").resolve()
+
+    # logs (train.log, metrics.csv, metrics.png, etc.)
+    logs_dir = root / "logs"
+    if logs_dir.exists():
+        for p in logs_dir.glob("*"):
+            if p.is_file():
+                move_path(p, root)
+
+    # top-level model snapshots
+    for p in root.glob("*.pth"):
+        if p.is_file():
+            move_path(p, root)
+
+    # checkpoints (recursive)
+    ckpt_dir = root / "checkpoints"
+    if ckpt_dir.exists():
+        for p in ckpt_dir.rglob("*"):
+            if p.is_file():
+                move_path(p, root)
+
+    return str(archive_dir)
+
+
 class TrainPipeline():
-    def __init__(self, init_model=None, use_gpu: bool | None = None):
+    def __init__(self, use_gpu: bool | None = None):
         # params of the board and the game
         self.board_width = 6
         self.board_height = 6
@@ -53,7 +98,7 @@ class TrainPipeline():
         self.game_batch_num = 20 #1500
         
         # Evaluation / arena settings
-        self.eval_games = 10  # number of games per evaluation
+        self.eval_games = 20  # number of games per evaluation
         self.arena_update_threshold = 0.55  # current beats best if winrate > threshold
         self.global_step = 0
         self.start_batch = 0
@@ -79,36 +124,46 @@ class TrainPipeline():
         if use_gpu is None:
             self.use_gpu = bool(torch.cuda.is_available())
         else:
-            self.use_gpu = bool(use_gpu) and bool(torch.cuda.is_available())
-        if (use_gpu is True) and (not torch.cuda.is_available()):
-            logger.warning("use_gpu=True but CUDA not available. Falling back to CPU.")
+            if use_gpu and (not torch.cuda.is_available()):
+                raise SystemExit("CUDA is not available, but --use-gpu was specified.")
+            self.use_gpu = bool(use_gpu)
 
-        # Initialization modes:
-        # - If init_model is provided (non-empty path): load weights from that file.
-        # - Otherwise: create a fresh net and (if available) resume from latest checkpoint.
-        has_init_model = init_model is not None and str(init_model).strip() != ""
-        if has_init_model:
-            self.policy_value_net = PolicyValueNet(
-                self.board_width,
-                self.board_height,
-                model_file=init_model,
-                use_gpu=self.use_gpu,
-                base_lr=self.learn_rate,
-            )
-        else:
-            self.policy_value_net = PolicyValueNet(
-                self.board_width,
-                self.board_height,
-                use_gpu=self.use_gpu,
-                base_lr=self.learn_rate,
-            )
-            self._try_resume_from_checkpoint()
+        self.policy_value_net = PolicyValueNet(
+            self.board_width,
+            self.board_height,
+            use_gpu=self.use_gpu,
+            base_lr=self.learn_rate,
+        )
+        self._try_resume_from_checkpoint()
 
         self.mcts_player = MCTSPlayer(
             self.policy_value_net.policy_value_fn,
             c_puct=self.c_puct,
             n_playout=self.n_playout,
             is_selfplay=1,
+        )
+
+        self.metrics_path = os.path.join("logs", "metrics_{}_{}_{}.csv".format(
+            self.board_width, self.board_height, self.n_in_row
+        ))
+        self._metrics = MetricsWriter(self.metrics_path, fieldnames=DEFAULT_METRICS_FIELDS)
+
+        device_str = "cuda" if getattr(self.policy_value_net, "device", None) and str(self.policy_value_net.device).startswith("cuda") else "cpu"
+        logger.info(
+            "Config | board=%sx%s connect-%s | device=%s | n_playout=%s c_puct=%s | lr=%.4g batch=%s epochs=%s buffer=%s | check_freq=%s eval_games=%s pure_mcts_playout=%s",
+            self.board_width,
+            self.board_height,
+            self.n_in_row,
+            device_str,
+            self.n_playout,
+            self.c_puct,
+            self.learn_rate,
+            self.batch_size,
+            self.epochs,
+            self.buffer_size,
+            self.check_freq,
+            self.eval_games,
+            self.pure_mcts_playout_num,
         )
 
     def _atomic_save_checkpoint(self, path: str, extra_state: dict) -> None:
@@ -139,9 +194,16 @@ class TrainPipeline():
                 np.random.set_state(np_rng)
             torch_rng = extra.get("torch_random_state")
             if torch_rng is not None:
+                if torch.is_tensor(torch_rng):
+                    torch_rng = torch_rng.detach().cpu().to(torch.uint8)
                 torch.set_rng_state(torch_rng)
             cuda_rng = extra.get("torch_cuda_random_state_all")
             if cuda_rng is not None and torch.cuda.is_available():
+                if isinstance(cuda_rng, (list, tuple)):
+                    cuda_rng = [
+                        (s.detach().cpu().to(torch.uint8) if torch.is_tensor(s) else s)
+                        for s in cuda_rng
+                    ]
                 torch.cuda.set_rng_state_all(cuda_rng)
 
             logger.info(
@@ -150,8 +212,8 @@ class TrainPipeline():
                 self.start_batch,
                 self.global_step,
             )
-        except Exception:
-            logger.exception("Failed to resume from checkpoint: %s", self.latest_checkpoint_path)
+        except Exception as e:
+            logger.warning("Skip checkpoint resume: %s (%s)", self.latest_checkpoint_path, e)
 
     def get_equi_data(self, play_data):
         """
@@ -197,8 +259,10 @@ class TrainPipeline():
         old_probs, old_v = self.policy_value_net.policy_value(state_batch)
         # Apply the current KL-adaptive multiplier once per policy update.
         self.policy_value_net.set_lr_multiplier(self.lr_multiplier)
+        policy_loss = None
+        value_loss = None
         for i in range(self.epochs):
-            loss, entropy = self.policy_value_net.train_step(
+            loss, entropy, policy_loss, value_loss = self.policy_value_net.train_step(
                     state_batch,
                     mcts_probs_batch,
                     winner_batch)
@@ -217,25 +281,10 @@ class TrainPipeline():
         elif kl < self.kl_targ / 2 and self.lr_multiplier < 10:
             self.lr_multiplier *= 1.5
 
-        explained_var_old = (1 -
-                             np.var(np.array(winner_batch) - old_v.flatten()) /
-                             np.var(np.array(winner_batch)))
-        explained_var_new = (1 -
-                             np.var(np.array(winner_batch) - new_v.flatten()) /
-                             np.var(np.array(winner_batch)))
-        logger.info(
-            "kl:%.5f, lr_multiplier:%.3f, loss:%s, entropy:%s, explained_var_old:%.3f, explained_var_new:%.3f",
-            kl,
-            self.lr_multiplier,
-            loss,
-            entropy,
-            explained_var_old,
-            explained_var_new,
-        )
         self.last_loss = loss
         self.last_entropy = entropy
         self.last_kl = kl
-        return loss, entropy
+        return loss, entropy, policy_loss, value_loss
 
     def _evaluate_current_vs_pure(self, n_games: int):
         """
@@ -337,33 +386,80 @@ class TrainPipeline():
     def run(self):
         """run the training pipeline"""
         last_batch_i = self.start_batch
+        run_device = str(getattr(self.policy_value_net, "device", "cpu"))
         try:
             for i in range(self.start_batch, self.game_batch_num):
                 last_batch_i = i + 1
+                t0 = time.time()
                 self.collect_selfplay_data(self.play_batch_size)
-                logger.info("batch i:%s, episode_len:%s", i + 1, self.episode_len)
+                self._metrics.write(
+                    {
+                        "timestamp": time.time(),
+                        "phase": "selfplay",
+                        "iteration": i + 1,
+                        "global_step": self.global_step,
+                        "episode_len": self.episode_len,
+                        "buffer_size": len(self.data_buffer),
+                        "loss": "",
+                        "policy_loss": "",
+                        "value_loss": "",
+                        "entropy": "",
+                        "kl": "",
+                        "lr": self.policy_value_net.current_lr(),
+                        "lr_multiplier": self.lr_multiplier,
+                        "arena_winrate": "",
+                        "baseline_winrate": "",
+                        "updated_best": "",
+                        "eval_games": "",
+                        "board_w": self.board_width,
+                        "board_h": self.board_height,
+                        "n_in_row": self.n_in_row,
+                        "n_playout": self.n_playout,
+                        "c_puct": self.c_puct,
+                        "temp": self.temp,
+                        "device": run_device,
+                    }
+                )
                 if len(self.data_buffer) > self.batch_size:
-                    loss, entropy = self.policy_update()
+                    t1 = time.time()
+                    loss, entropy, policy_loss, value_loss = self.policy_update()
+                    self._metrics.write(
+                        {
+                            "timestamp": time.time(),
+                            "phase": "update",
+                            "iteration": i + 1,
+                            "global_step": self.global_step,
+                            "episode_len": self.episode_len,
+                            "buffer_size": len(self.data_buffer),
+                            "loss": loss,
+                            "policy_loss": policy_loss,
+                            "value_loss": value_loss,
+                            "entropy": entropy,
+                            "kl": self.last_kl,
+                            "lr": self.policy_value_net.current_lr(),
+                            "lr_multiplier": self.lr_multiplier,
+                            "arena_winrate": "",
+                            "baseline_winrate": "",
+                            "updated_best": "",
+                            "eval_games": "",
+                            "board_w": self.board_width,
+                            "board_h": self.board_height,
+                            "n_in_row": self.n_in_row,
+                            "n_playout": self.n_playout,
+                            "c_puct": self.c_puct,
+                            "temp": self.temp,
+                            "device": run_device,
+                        }
+                    )
                 # check the performance of the current model,
                 # and save the model params
                 if (i+1) % self.check_freq == 0:
-                    logger.info("current self-play batch: %s", i + 1)
-
                     # Dual-axis evaluation:
                     # - Arena (relative): current vs best
                     # - Monitor (absolute baseline): current vs pure MCTS
                     arena_win, _ = self._evaluate_current_vs_best(self.eval_games)
                     baseline_win, baseline_cnt = self._evaluate_current_vs_pure(self.eval_games)
                     self.baseline_winrates.append(baseline_win)
-
-                    # Keep original per-opponent breakdown log for baseline.
-                    logger.info(
-                        "pure_mcts num_playouts:%s, win:%s, lose:%s, tie:%s",
-                        self.pure_mcts_playout_num,
-                        baseline_cnt[1],
-                        baseline_cnt[2],
-                        baseline_cnt[-1],
-                    )
 
                     # Arena gating: update best if current is consistently better.
                     improved = arena_win > self.arena_update_threshold
@@ -395,6 +491,34 @@ class TrainPipeline():
                         arena_winrate=arena_win,
                         arena_update_best=improved,
                         baseline_winrate=baseline_win,
+                    )
+                    self._metrics.write(
+                        {
+                            "timestamp": time.time(),
+                            "phase": "eval",
+                            "iteration": i + 1,
+                            "global_step": self.global_step,
+                            "episode_len": self.episode_len,
+                            "buffer_size": len(self.data_buffer),
+                            "loss": "",
+                            "policy_loss": "",
+                            "value_loss": "",
+                            "entropy": "",
+                            "kl": "",
+                            "lr": self.policy_value_net.current_lr(),
+                            "lr_multiplier": self.lr_multiplier,
+                            "arena_winrate": arena_win,
+                            "baseline_winrate": baseline_win,
+                            "updated_best": 1 if improved else 0,
+                            "eval_games": self.eval_games,
+                            "board_w": self.board_width,
+                            "board_h": self.board_height,
+                            "n_in_row": self.n_in_row,
+                            "n_playout": self.n_playout,
+                            "c_puct": self.c_puct,
+                            "temp": self.temp,
+                            "device": run_device,
+                        }
                     )
 
                     # Save a resumable training checkpoint after updating state.
@@ -436,15 +560,30 @@ class TrainPipeline():
             except Exception:
                 logger.exception("Failed to save checkpoint on interrupt.")
             logger.info("quit")
+        finally:
+            try:
+                self._metrics.close()
+            except Exception:
+                pass
 
 
 if __name__ == '__main__':
-    setup_logging(log_file="logs/train.log")
     parser = argparse.ArgumentParser()
-    parser.add_argument("--init-model", default=None, help="Optional path to a .pth model to initialize from.")
-    parser.add_argument("--use-gpu", action="store_true", help="Use CUDA if available.")
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Archive current outputs (logs/models/checkpoints) and exit.",
+    )
+    parser.add_argument("--use-gpu", action="store_true", help="Force CUDA (error if unavailable).")
     parser.add_argument("--cpu", action="store_true", help="Force CPU even if CUDA is available.")
     args = parser.parse_args()
+
+    if args.reset:
+        archived_to = _archive_and_clear_outputs(archive_root="runs")
+        print(f"Archived previous outputs to: {archived_to}")
+        sys.exit(0)
+
+    setup_logging(log_file="logs/train.log")
 
     use_gpu = None
     if args.cpu:
@@ -452,5 +591,5 @@ if __name__ == '__main__':
     elif args.use_gpu:
         use_gpu = True
 
-    training_pipeline = TrainPipeline(init_model=args.init_model, use_gpu=use_gpu)
+    training_pipeline = TrainPipeline(use_gpu=use_gpu)
     training_pipeline.run()

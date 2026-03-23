@@ -74,7 +74,7 @@ class PolicyValueNet():
         )
 
         if model_file:
-            net_params = torch.load(model_file, map_location=self.device)
+            net_params = torch.load(model_file, map_location=self.device, weights_only=True)
             self.policy_value_net.load_state_dict(net_params)
 
     def set_lr_multiplier(self, lr_multiplier: float) -> None:
@@ -102,7 +102,8 @@ class PolicyValueNet():
         output: a batch of action probabilities and state values
         """
         self.policy_value_net.eval()
-        state_batch_t = torch.as_tensor(state_batch, dtype=torch.float32, device=self.device)
+        state_batch_np = np.ascontiguousarray(np.asarray(state_batch, dtype=np.float32))
+        state_batch_t = torch.from_numpy(state_batch_np).to(self.device)
         log_act_probs, value = self.policy_value_net(state_batch_t)
         act_probs = torch.exp(log_act_probs).cpu().numpy()
         return act_probs, value.view(-1, 1).cpu().numpy()
@@ -125,13 +126,17 @@ class PolicyValueNet():
         action_priors = [(pos, float(act_probs[pos])) for pos in legal_positions]
         return action_priors, value
 
-    def train_step(self, state_batch, mcts_probs, winner_batch) -> Tuple[float, float]:
+    def train_step(self, state_batch, mcts_probs, winner_batch) -> Tuple[float, float, float, float]:
         """perform a training step"""
 
         self.policy_value_net.train()
-        state_batch_t = torch.as_tensor(state_batch, dtype=torch.float32, device=self.device)
-        mcts_probs_t = torch.as_tensor(mcts_probs, dtype=torch.float32, device=self.device)
-        winner_batch_t = torch.as_tensor(winner_batch, dtype=torch.float32, device=self.device)
+        state_batch_np = np.ascontiguousarray(np.asarray(state_batch, dtype=np.float32))
+        mcts_probs_np = np.ascontiguousarray(np.asarray(mcts_probs, dtype=np.float32))
+        winner_batch_np = np.ascontiguousarray(np.asarray(winner_batch, dtype=np.float32))
+
+        state_batch_t = torch.from_numpy(state_batch_np).to(self.device)
+        mcts_probs_t = torch.from_numpy(mcts_probs_np).to(self.device)
+        winner_batch_t = torch.from_numpy(winner_batch_np).to(self.device)
 
         # zero the parameter gradients
         self.optimizer.zero_grad()
@@ -150,7 +155,7 @@ class PolicyValueNet():
         entropy = -torch.mean(
                 torch.sum(torch.exp(log_act_probs) * log_act_probs, 1)
                 )
-        return loss.item(), entropy.item()
+        return loss.item(), entropy.item(), policy_loss.item(), value_loss.item()
 
     def get_policy_param(self):
         net_params = self.policy_value_net.state_dict()
@@ -198,11 +203,9 @@ class PolicyValueNet():
 
         Returns the stored extra_state dict.
         """
-        map_location = self.device
-        try:
-            ckpt = torch.load(checkpoint_file, map_location=map_location, weights_only=False)
-        except TypeError:
-            ckpt = torch.load(checkpoint_file, map_location=map_location)
+        # Load to CPU first to avoid placing RNG state tensors on CUDA.
+        map_location = torch.device("cpu")
+        ckpt = torch.load(checkpoint_file, map_location=map_location, weights_only=False)
         self.policy_value_net.load_state_dict(ckpt["model_state_dict"])
         self.optimizer.load_state_dict(ckpt["optimizer_state_dict"])
         self.base_lr = float(ckpt.get("base_lr", self.base_lr))
