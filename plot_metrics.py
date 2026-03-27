@@ -1,7 +1,8 @@
 import argparse
 import csv
-import math
 from pathlib import Path
+
+from az_metrics import wilson_ci
 
 
 def _to_float(x: str):
@@ -30,18 +31,6 @@ def read_metrics_csv(path: Path):
         for row in r:
             rows.append(row)
     return rows
-
-
-def wilson_ci(p: float, n: int, z: float = 1.96) -> tuple[float, float]:
-    if n <= 0:
-        return (float("nan"), float("nan"))
-    p = max(0.0, min(1.0, float(p)))
-    n = int(n)
-    z2 = z * z
-    denom = 1.0 + z2 / n
-    center = (p + z2 / (2.0 * n)) / denom
-    half = (z / denom) * math.sqrt(p * (1.0 - p) / n + z2 / (4.0 * n * n))
-    return (max(0.0, center - half), min(1.0, center + half))
 
 
 def main() -> int:

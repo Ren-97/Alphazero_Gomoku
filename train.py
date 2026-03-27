@@ -18,7 +18,7 @@ from mcts_pure import MCTSPlayer as MCTS_Pure
 from mcts_alphaZero import MCTSPlayer
 from policy_value_net import PolicyValueNet 
 from az_logging import setup_logging
-from az_metrics import MetricsWriter, DEFAULT_METRICS_FIELDS
+from az_metrics import MetricsWriter, DEFAULT_METRICS_FIELDS, wilson_ci
 
 
 logger = logging.getLogger(__name__)
@@ -86,7 +86,7 @@ class TrainPipeline():
         self.learn_rate = 2e-3
         self.lr_multiplier = 1.0  # adaptively adjust the learning rate based on KL
         self.temp = 1.0  # the temperature param
-        self.n_playout = 10  #400 # num of simulations for each move
+        self.n_playout = 200  #400 # num of simulations for each move
         self.c_puct = 5 # Exploration Coefficient (PUCT:Predictor + Upper Confidence Bound applied to Trees)
         self.buffer_size = 10000
         self.batch_size = 512  # mini-batch size for training
@@ -94,11 +94,11 @@ class TrainPipeline():
         self.play_batch_size = 1
         self.epochs = 5  # num of train_steps for each update
         self.kl_targ = 0.02
-        self.check_freq = 5 #50
-        self.game_batch_num = 20 #1500
+        self.check_freq = 50 #50
+        self.game_batch_num = 500 #1500
         
         # Evaluation / arena settings
-        self.eval_games = 20  # number of games per evaluation
+        self.eval_games = 15  # number of games per evaluation
         self.arena_update_threshold = 0.55  # current beats best if winrate > threshold
         self.global_step = 0
         self.start_batch = 0
@@ -111,7 +111,7 @@ class TrainPipeline():
         self.best_checkpoint_path = os.path.join(self.checkpoint_dir, "best.pth")
 
         # num of simulations used for the pure mcts, which is used as the opponent to evaluate the trained policy
-        self.pure_mcts_playout_num = 200 # 1000
+        self.pure_mcts_playout_num = 600 # 1000
 
         # Rolling stats for logging/monitoring
         self.episode_lens = deque(maxlen=200)
@@ -356,23 +356,31 @@ class TrainPipeline():
         arena_winrate: float,
         arena_update_best: bool,
         baseline_winrate: float,
+        arena_ci: tuple[float, float],
+        baseline_ci: tuple[float, float],
     ) -> None:
         line = "-" * 50
         avg_len = float(np.mean(self.episode_lens)) if self.episode_lens else float("nan")
         trend = self._trend_label(self.baseline_winrates)
         loss = "N/A" if self.last_loss is None else "{:.4f}".format(self.last_loss)
         entropy = "N/A" if self.last_entropy is None else "{:.4f}".format(self.last_entropy)
+        a_lo, a_hi = arena_ci
+        b_lo, b_hi = baseline_ci
 
         logger.info("Iteration [%s]", iteration)
         logger.info(line)
         logger.info(
-            "[Arena]   Current vs Best: Winrate %.1f%% | Result: %s",
+            "[Arena]   Current vs Best: Winrate %.1f%% (95%% Wilson CI: %.1f%%–%.1f%%) | Result: %s",
             arena_winrate * 100.0,
+            a_lo * 100.0,
+            a_hi * 100.0,
             "UPDATE BEST!" if arena_update_best else "keep best",
         )
         logger.info(
-            "[Monitor] Current vs Pure MCTS: Winrate %.1f%% | Trend: %s",
+            "[Monitor] Current vs Pure MCTS: Winrate %.1f%% (95%% Wilson CI: %.1f%%–%.1f%%) | Trend: %s",
             baseline_winrate * 100.0,
+            b_lo * 100.0,
+            b_hi * 100.0,
             trend,
         )
         logger.info(
@@ -390,7 +398,6 @@ class TrainPipeline():
         try:
             for i in range(self.start_batch, self.game_batch_num):
                 last_batch_i = i + 1
-                t0 = time.time()
                 self.collect_selfplay_data(self.play_batch_size)
                 self._metrics.write(
                     {
@@ -421,7 +428,6 @@ class TrainPipeline():
                     }
                 )
                 if len(self.data_buffer) > self.batch_size:
-                    t1 = time.time()
                     loss, entropy, policy_loss, value_loss = self.policy_update()
                     self._metrics.write(
                         {
@@ -458,7 +464,9 @@ class TrainPipeline():
                     # - Arena (relative): current vs best
                     # - Monitor (absolute baseline): current vs pure MCTS
                     arena_win, _ = self._evaluate_current_vs_best(self.eval_games)
-                    baseline_win, baseline_cnt = self._evaluate_current_vs_pure(self.eval_games)
+                    baseline_win, _ = self._evaluate_current_vs_pure(self.eval_games)
+                    a_lo, a_hi = wilson_ci(arena_win, self.eval_games)
+                    b_lo, b_hi = wilson_ci(baseline_win, self.eval_games)
                     self.baseline_winrates.append(baseline_win)
 
                     # Arena gating: update best if current is consistently better.
@@ -491,6 +499,8 @@ class TrainPipeline():
                         arena_winrate=arena_win,
                         arena_update_best=improved,
                         baseline_winrate=baseline_win,
+                        arena_ci=(a_lo, a_hi),
+                        baseline_ci=(b_lo, b_hi),
                     )
                     self._metrics.write(
                         {

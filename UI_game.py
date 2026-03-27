@@ -1,5 +1,11 @@
 """
-Minimal UI (Streamlit) for AlphaZero_Gomoku.
+Minimal UI (Streamlit) for Human vs AI Gomoku.
+
+Only includes:
+- choose model (from `results/` folder)
+- choose who plays first
+- play by clicking the board
+- show winner at the end
 
 Run:
   pip install -r requirements.txt
@@ -8,9 +14,8 @@ Run:
 
 from __future__ import annotations
 
-from io import BytesIO
+import re
 from pathlib import Path
-import time
 
 import streamlit as st
 from PIL import Image, ImageDraw
@@ -19,14 +24,7 @@ from streamlit_image_coordinates import streamlit_image_coordinates
 from az_logging import setup_logging
 from game import Board
 from mcts_alphaZero import MCTSPlayer
-from mcts_pure import MCTSPlayer as MCTS_Pure
 from policy_value_net import PolicyValueNet
-
-
-PRESETS = {
-    "6x6 connect-4": {"w": 6, "h": 6, "n": 4, "model": "best_policy_6_6_4.pth"},
-    "8x8 connect-5": {"w": 8, "h": 8, "n": 5, "model": "best_policy_8_8_5.pth"},
-}
 
 
 def _resolve_model_path(model_file: str) -> Path:
@@ -44,20 +42,46 @@ def _load_policy(w: int, h: int, model_file: str) -> PolicyValueNet:
     return PolicyValueNet(w, h, model_file=str(model_path), use_gpu=False)
 
 
-def _make_ai(*, preset: dict, pure_mcts: bool, playouts: int, c_puct: float, self_play: bool):
-    if pure_mcts:
-        return MCTS_Pure(c_puct=c_puct, n_playout=max(1000, playouts))
-    pv = _load_policy(preset["w"], preset["h"], preset["model"])
+def _make_ai(*, w: int, h: int, model_file: str, playouts: int = 400, c_puct: float = 5.0) -> MCTSPlayer:
+    pv = _load_policy(w, h, model_file)
     return MCTSPlayer(
         pv.policy_value_fn,
         c_puct=c_puct,
         n_playout=playouts,
-        is_selfplay=1 if self_play else 0,
+        is_selfplay=0,
     )
 
 
-def _stone(p: int) -> str:
-    return "●" if p == 1 else ("○" if p == 2 else "·")
+def _infer_board_params_from_model_name(model_path: Path) -> tuple[int, int, int] | None:
+    """
+    Try to infer (w, h, n_in_row) from filenames like:
+      best_policy_6_6_4.pth
+      best_policy_8_8_5.pth
+    """
+    m = re.search(r"(\d+)[^\d]+(\d+)[^\d]+(\d+)\.pth$", model_path.name)
+    if not m:
+        return None
+    w, h, n = (int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    if w <= 0 or h <= 0 or n <= 0:
+        return None
+    return w, h, n
+
+
+def _discover_models(base_dir: Path) -> list[Path]:
+    """
+    Discover play models from `results/` folder only.
+    """
+    results_dir = base_dir / "results"
+    if not results_dir.exists():
+        return []
+    paths = list(results_dir.glob("*.pth")) + list(results_dir.glob("**/*.pth"))
+    # Deduplicate while keeping most recently modified first.
+    uniq: dict[Path, Path] = {}
+    for p in paths:
+        uniq[p.resolve()] = p
+    out = list(uniq.values())
+    out.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return out
 
 
 def _board_image(board: Board, last_move: int | None) -> tuple[Image.Image, dict]:
@@ -134,33 +158,25 @@ def _click_to_move(click: dict | None, meta: dict) -> int | None:
 def _init_state() -> None:
     st.session_state.setdefault("board", None)
     st.session_state.setdefault("ai", None)
-    st.session_state.setdefault("human_player", 1)  # int | None
+    st.session_state.setdefault("human_player", 1)
     st.session_state.setdefault("last_move", None)
     st.session_state.setdefault("game_over", False)
     st.session_state.setdefault("winner", None)  # int | None (None=tie)
-    st.session_state.setdefault("mode", "Human vs AI")
+    st.session_state.setdefault("model_file", None)
+    st.session_state.setdefault("board_params", None)  # tuple[int,int,int] | None
 
 
-def _new_game(*, preset: dict, mode: str, pure_mcts: bool, playouts: int, c_puct: float, first: str):
-    board = Board(width=preset["w"], height=preset["h"], n_in_row=preset["n"])
-    start_player_idx = 0
-    if mode == "Human vs AI" and first == "AI first":
-        start_player_idx = 1
-    board.init_board(start_player=start_player_idx)
+def _new_game(*, w: int, h: int, n_in_row: int, model_file: str, first: str) -> None:
+    board = Board(width=w, height=h, n_in_row=n_in_row)
+    # Gomoku rule: Black (player 1) always moves first. Do not use start_player=1,
+    # or White would open — then "AI first" looked like you play White but still opened.
+    board.init_board(start_player=0)
 
-    ai = _make_ai(
-        preset=preset,
-        pure_mcts=pure_mcts,
-        playouts=playouts,
-        c_puct=c_puct,
-        self_play=(mode == "Self-play"),
-    )
+    # Human first: human is Black (1), AI is White (2).
+    # AI first: AI is Black (1), human is White (2).
+    human_player = 1 if first == "Human first" else 2
 
-    if mode == "Self-play":
-        human_player = None
-    else:
-        p1, p2 = board.players
-        human_player = p1 if start_player_idx == 0 else p2
+    ai = _make_ai(w=w, h=h, model_file=model_file, playouts=400, c_puct=5.0)
 
     st.session_state.board = board
     st.session_state.ai = ai
@@ -168,7 +184,11 @@ def _new_game(*, preset: dict, mode: str, pure_mcts: bool, playouts: int, c_puct
     st.session_state.last_move = None
     st.session_state.game_over = False
     st.session_state.winner = None
-    st.session_state.mode = mode
+    st.session_state.model_file = model_file
+    st.session_state.board_params = (w, h, n_in_row)
+
+    if first == "AI first":
+        _ai_move(temp=1e-3)
 
 
 def _do_move(move: int) -> None:
@@ -183,66 +203,65 @@ def _do_move(move: int) -> None:
         st.session_state.winner = None if wnr == -1 else wnr
 
 
-def _ai_move(*, temp: float) -> None:
+def _ai_move(*, temp: float = 1e-3) -> None:
     board: Board = st.session_state.board
     ai = st.session_state.ai
-    if isinstance(ai, MCTSPlayer):
-        move = int(ai.get_action(board, temp=temp))
-    else:
-        move = int(ai.get_action(board))
+    move = int(ai.get_action(board, temp=temp))
     _do_move(move)
-
-
-def _is_ai_turn(board: Board) -> bool:
-    hp: int | None = st.session_state.human_player
-    if hp is None:
-        return True
-    return board.get_current_player() != hp
 
 
 def main() -> None:
     setup_logging(log_file=None)
-    st.set_page_config(page_title="Gomoku UI", layout="wide")
+    st.set_page_config(page_title="Gomoku UI", layout="centered")
     _init_state()
 
-    st.title("Gomoku (AlphaZero) – UI")
+    st.title("Gomoku – Human vs AI")
+
+    base_dir = Path(__file__).resolve().parent
+    model_paths = _discover_models(base_dir)
+    model_labels: list[str] = []
+    for p in model_paths:
+        try:
+            model_labels.append(str(p.resolve().relative_to(base_dir.resolve())))
+        except Exception:
+            model_labels.append(str(p))
 
     with st.sidebar:
-        preset_name = st.selectbox("Preset", list(PRESETS.keys()), index=0)
-        preset = PRESETS[preset_name]
-        mode = st.radio("Mode", ["Human vs AI", "Self-play"], horizontal=True)
-        first = "Human first"
-        if mode == "Human vs AI":
-            first = st.radio("First", ["Human first", "AI first"], horizontal=True)
+        st.markdown("### Settings")
+        if not model_labels:
+            st.warning("No models found in `results/`. Put your `.pth` files into `results/`.")
+            model_file = ""
+        else:
+            model_file = st.selectbox("Model", model_labels, index=0)
+        first = st.radio("First", ["Human first", "AI first"], horizontal=True)
 
-        pure_mcts = st.toggle("Pure MCTS (no net)", value=False)
-        playouts = st.slider("Playouts", 50, 2000, 400, 50)
-        c_puct = st.slider("c_puct", 0.5, 10.0, 5.0, 0.5)
-        temp = st.slider("temp", 0.01, 2.0, 0.10 if mode == "Self-play" else 0.01, 0.01)
+        if model_file:
+            inferred = _infer_board_params_from_model_name(_resolve_model_path(model_file))
+        else:
+            inferred = None
+        if inferred is None:
+            with st.expander("Board params (only needed if not in filename)", expanded=True):
+                w = st.number_input("width", min_value=3, max_value=25, value=8, step=1)
+                h = st.number_input("height", min_value=3, max_value=25, value=8, step=1)
+                n_in_row = st.number_input("n_in_row", min_value=3, max_value=min(int(w), int(h)), value=5, step=1)
+            w, h, n_in_row = int(w), int(h), int(n_in_row)
+        else:
+            w, h, n_in_row = inferred
+            st.caption(f"Board: {w}x{h}, connect-{n_in_row}")
 
-        if st.button("New game", type="primary"):
+        can_start = bool(model_file)
+        if st.button("New game", type="primary", disabled=not can_start):
             try:
-                _new_game(
-                    preset=preset,
-                    mode=mode,
-                    pure_mcts=pure_mcts,
-                    playouts=playouts,
-                    c_puct=c_puct,
-                    first=first,
-                )
+                _new_game(w=w, h=h, n_in_row=n_in_row, model_file=model_file, first=first)
             except Exception as e:
                 st.error(str(e))
 
-        st.caption("Tip: if model file not found, put the `.pth` next to this script.")
-
     if st.session_state.board is None:
-        st.info("Click **New game** in the sidebar.")
+        st.info("Choose a model and who plays first, then click **New game**.")
         return
 
     board: Board = st.session_state.board
-    human_player: int | None = st.session_state.human_player
-    cur = board.get_current_player()
-    turn = "Black(●)" if cur == 1 else "White(○)"
+    human_player: int = st.session_state.human_player
 
     if st.session_state.game_over:
         if st.session_state.winner is None:
@@ -250,62 +269,22 @@ def main() -> None:
         else:
             st.success(f"Game over: {'Black(●)' if st.session_state.winner == 1 else 'White(○)'} wins")
     else:
+        cur = board.get_current_player()
+        turn = "Black(●)" if cur == 1 else "White(○)"
         st.write(f"Turn: {turn}")
 
-    left, right = st.columns([3, 1], gap="large")
-    with left:
-        img, meta = _board_image(board, st.session_state.last_move)
-        click = streamlit_image_coordinates(img, key=f"board-{len(board.states)}")
-        st.caption("Tip: click near an intersection to place a stone.")
+    img, meta = _board_image(board, st.session_state.last_move)
+    click = streamlit_image_coordinates(img, key=f"board-{len(board.states)}")
+    st.caption("Click near an intersection to play.")
 
-        if st.session_state.mode == "Human vs AI" and not st.session_state.game_over:
-            move = _click_to_move(click, meta)
-            is_human_turn = human_player is not None and board.get_current_player() == human_player
-            if move is not None and is_human_turn and move in board.availables:
-                _do_move(move)
-                if not st.session_state.game_over:
-                    _ai_move(temp=temp)
-                st.rerun()
-
-            with st.expander("Or enter row/col", expanded=False):
-                rr, cc = st.columns(2)
-                row = rr.number_input("row", min_value=0, max_value=board.height - 1, value=0, step=1)
-                col = cc.number_input("col", min_value=0, max_value=board.width - 1, value=0, step=1)
-                move2 = int(row) * board.width + int(col)
-                can_play = is_human_turn and move2 in board.availables
-                if st.button("Play", disabled=not can_play):
-                    _do_move(move2)
-                    if not st.session_state.game_over:
-                        _ai_move(temp=temp)
-                    st.rerun()
-
-    with right:
-        st.markdown("### Controls")
-        if st.session_state.mode == "Self-play":
-            if st.button("Step", disabled=st.session_state.game_over):
-                _ai_move(temp=temp)
-                st.rerun()
-            n = st.number_input("Auto N", 1, 200, 30, 1)
-            if st.button("Auto", disabled=st.session_state.game_over):
-                for _ in range(int(n)):
-                    if st.session_state.game_over:
-                        break
-                    _ai_move(temp=temp)
-                    time.sleep(0.02)
-                st.rerun()
-        else:
-            if st.button("AI move", disabled=st.session_state.game_over or (human_player is not None and board.get_current_player() == human_player)):
-                _ai_move(temp=temp)
-                st.rerun()
-
-        st.markdown("### Info")
-        st.write(
-            {
-                "board": f'{board.width}x{board.height}, connect-{board.n_in_row}',
-                "pure_mcts": pure_mcts,
-                "model": None if pure_mcts else str(_resolve_model_path(preset["model"])),
-            }
-        )
+    if not st.session_state.game_over:
+        move = _click_to_move(click, meta)
+        is_human_turn = board.get_current_player() == human_player
+        if move is not None and is_human_turn and move in board.availables:
+            _do_move(move)
+            if not st.session_state.game_over:
+                _ai_move(temp=1e-3)
+            st.rerun()
 
 
 if __name__ == "__main__":
