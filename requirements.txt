@@ -3,6 +3,6 @@ streamlit>=1.30
 pillow
 streamlit-image-coordinates
 matplotlib>=3.7
-# PyTorch is required for training/playing with .pth checkpoints.
-# Install it manually to match your CUDA/CPU setup (recommended).
+
+# Install it manually to match your CUDA/CPU setup.
 # pip install --index-url https://download.pytorch.org/whl/cu121 torch torchvision torchaudio
