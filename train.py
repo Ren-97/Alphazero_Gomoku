@@ -8,6 +8,7 @@ import random
 import time
 import argparse
 import shutil
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 import sys
 import numpy as np
@@ -22,6 +23,47 @@ from az_metrics import MetricsWriter, DEFAULT_METRICS_FIELDS, wilson_ci
 
 
 logger = logging.getLogger(__name__)
+
+
+def _selfplay_worker(args: tuple) -> tuple:
+    """
+    Run one self-play game in a separate process. Loads policy weights from disk (CPU inference).
+    """
+    (
+        model_path,
+        board_width,
+        board_height,
+        n_in_row,
+        temp,
+        n_playout,
+        c_puct,
+        seed,
+    ) = args
+    random.seed(seed)
+    np.random.seed(seed % (2**32))
+    torch.manual_seed(seed % (2**32))
+
+    board = Board(width=board_width, height=board_height, n_in_row=n_in_row)
+    game = Game(board)
+    net = PolicyValueNet(
+        board_width,
+        board_height,
+        model_file=model_path,
+        use_gpu=False,
+    )
+    player = MCTSPlayer(
+        net.policy_value_fn,
+        c_puct=c_puct,
+        n_playout=n_playout,
+        is_selfplay=1,
+    )
+    _winner, play_data = game.start_self_play(player, temp=temp)
+    play_data = list(play_data)
+    serializable = [
+        (np.asarray(s, dtype=np.float32), np.asarray(p, dtype=np.float32), float(z))
+        for s, p, z in play_data
+    ]
+    return serializable
 
 
 def _archive_and_clear_outputs(*, archive_root: str = "runs") -> str:
@@ -66,11 +108,11 @@ def _archive_and_clear_outputs(*, archive_root: str = "runs") -> str:
 
 
 class TrainPipeline():
-    def __init__(self, use_gpu: bool | None = None):
+    def __init__(self, use_gpu: bool | None = None, self_play_workers: int = 1):
         # params of the board and the game
-        self.board_width = 8
-        self.board_height = 8
-        self.n_in_row = 5
+        self.board_width = 6
+        self.board_height = 6
+        self.n_in_row = 4
         self.current_policy_path = "./current_policy_{}_{}_{}.pth".format(
             self.board_width, self.board_height, self.n_in_row
         )
@@ -86,19 +128,22 @@ class TrainPipeline():
         self.learn_rate = 2e-3
         self.lr_multiplier = 1.0  # adaptively adjust the learning rate based on KL
         self.temp = 1.0  # the temperature param
-        self.n_playout = 400  #400 # num of simulations for each move
+        self.n_playout = 200  #400 # num of simulations for each move
         self.c_puct = 5 # Exploration Coefficient (PUCT:Predictor + Upper Confidence Bound applied to Trees)
         self.buffer_size = 10000
         self.batch_size = 512  # mini-batch size for training
         self.data_buffer = deque(maxlen=self.buffer_size)
-        self.play_batch_size = 1
+        self.self_play_workers = int(self_play_workers)
+        if self.self_play_workers < 1:
+            raise ValueError("self_play_workers must be >= 1")
+        self.play_batch_size = self.self_play_workers
         self.epochs = 5  # num of train_steps for each update
         self.kl_targ = 0.02
-        self.check_freq = 50 #50
-        self.game_batch_num = 1500 #1500
+        self.check_freq = 15 
+        self.game_batch_num = 150 #1600/16 = 100; 1600 games only need 100 iterations to train if workers are 16.
         
         # Evaluation / arena settings
-        self.eval_games = 25  # number of games per evaluation
+        self.eval_games = 15  # number of games per evaluation
         self.arena_update_threshold = 0.55  # current beats best if winrate > threshold
         self.global_step = 0
         self.start_batch = 0
@@ -111,7 +156,7 @@ class TrainPipeline():
         self.best_checkpoint_path = os.path.join(self.checkpoint_dir, "best.pth")
 
         # num of simulations used for the pure mcts, which is used as the opponent to evaluate the trained policy
-        self.pure_mcts_playout_num = 1000 # 1000
+        self.pure_mcts_playout_num = 600 # 1000
 
         # Rolling stats for logging/monitoring
         self.episode_lens = deque(maxlen=200)
@@ -165,6 +210,7 @@ class TrainPipeline():
             self.eval_games,
             self.pure_mcts_playout_num,
         )
+        logger.info("Self-play workers: %s", self.self_play_workers)
 
     def _atomic_save_checkpoint(self, path: str, extra_state: dict) -> None:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -240,15 +286,46 @@ class TrainPipeline():
 
     def collect_selfplay_data(self, n_games=1):
         """collect self-play data for training"""
-        for i in range(n_games):
-            winner, play_data = self.game.start_self_play(self.mcts_player,
-                                                          temp=self.temp)
-            play_data = list(play_data)[:]
-            self.episode_len = len(play_data)
-            self.episode_lens.append(self.episode_len)
-            # augment the data
-            play_data = self.get_equi_data(play_data)
-            self.data_buffer.extend(play_data)
+        if self.self_play_workers == 1:
+            for _i in range(n_games):
+                _winner, play_data = self.game.start_self_play(
+                    self.mcts_player, temp=self.temp
+                )
+                play_data = list(play_data)[:]
+                self.episode_len = len(play_data)
+                self.episode_lens.append(self.episode_len)
+                play_data = self.get_equi_data(play_data)
+                self.data_buffer.extend(play_data)
+            return
+
+        self.policy_value_net.save_model(self.current_policy_path)
+        model_abs = os.path.abspath(self.current_policy_path)
+
+        base_seed = random.randint(0, 2**31 - 1)
+        arg_lists = [
+            (
+                model_abs,
+                self.board_width,
+                self.board_height,
+                self.n_in_row,
+                self.temp,
+                self.n_playout,
+                self.c_puct,
+                base_seed + i,
+            )
+            for i in range(n_games)
+        ]
+        # With play_batch_size == self.self_play_workers, n_games equals self.self_play_workers here.
+        # max_workers = min(self.self_play_workers, n_games)
+        max_workers = self.self_play_workers
+        with ProcessPoolExecutor(max_workers=max_workers) as ex:
+            futures = [ex.submit(_selfplay_worker, a) for a in arg_lists]
+            for fut in as_completed(futures):
+                play_data = fut.result()
+                self.episode_len = len(play_data)
+                self.episode_lens.append(self.episode_len)
+                play_data = self.get_equi_data(play_data)
+                self.data_buffer.extend(play_data)
 
     def policy_update(self):
         """update the policy-value net"""
@@ -585,6 +662,13 @@ if __name__ == '__main__':
     )
     parser.add_argument("--use-gpu", action="store_true", help="Force CUDA (error if unavailable).")
     parser.add_argument("--cpu", action="store_true", help="Force CPU even if CUDA is available.")
+    parser.add_argument(
+        "--self-play-workers",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Parallel self-play processes.",
+    )
     args = parser.parse_args()
 
     if args.reset:
@@ -600,5 +684,8 @@ if __name__ == '__main__':
     elif args.use_gpu:
         use_gpu = True
 
-    training_pipeline = TrainPipeline(use_gpu=use_gpu)
+    training_pipeline = TrainPipeline(
+        use_gpu=use_gpu,
+        self_play_workers=args.self_play_workers,
+    )
     training_pipeline.run()
