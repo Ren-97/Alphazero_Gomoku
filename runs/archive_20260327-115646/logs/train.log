@@ -1,0 +1,68 @@
+2026-03-23 22:43:37 | INFO | __main__ | Config | board=6x6 connect-4 | device=cuda | n_playout=200 c_puct=5 | lr=0.002 batch=512 epochs=5 buffer=10000 | check_freq=50 eval_games=15 pure_mcts_playout=600
+2026-03-23 22:45:59 | INFO | __main__ | Initialized best policy from current: ./best_policy_6_6_4.pth
+2026-03-23 22:47:05 | INFO | __main__ | Arena passed (0.600 > 0.550). Updating best policy.
+2026-03-23 22:47:05 | INFO | __main__ | Iteration [50]
+2026-03-23 22:47:05 | INFO | __main__ | --------------------------------------------------
+2026-03-23 22:47:05 | INFO | __main__ | [Arena]   Current vs Best: Winrate 60.0% (95% Wilson CI: 35.7%–80.2%) | Result: UPDATE BEST!
+2026-03-23 22:47:05 | INFO | __main__ | [Monitor] Current vs Pure MCTS: Winrate 20.0% (95% Wilson CI: 7.0%–45.2%) | Trend: N/A
+2026-03-23 22:47:05 | INFO | __main__ | [Stats]   Avg Game Length: 13.9 steps | Loss: 3.5528 | Entropy: 3.0512
+2026-03-23 22:47:05 | INFO | __main__ | --------------------------------------------------
+2026-03-23 22:50:17 | INFO | __main__ | Arena passed (1.000 > 0.550). Updating best policy.
+2026-03-23 22:50:17 | INFO | __main__ | Iteration [100]
+2026-03-23 22:50:17 | INFO | __main__ | --------------------------------------------------
+2026-03-23 22:50:17 | INFO | __main__ | [Arena]   Current vs Best: Winrate 100.0% (95% Wilson CI: 79.6%–100.0%) | Result: UPDATE BEST!
+2026-03-23 22:50:17 | INFO | __main__ | [Monitor] Current vs Pure MCTS: Winrate 73.3% (95% Wilson CI: 48.0%–89.1%) | Trend: N/A
+2026-03-23 22:50:17 | INFO | __main__ | [Stats]   Avg Game Length: 12.8 steps | Loss: 3.3632 | Entropy: 2.9350
+2026-03-23 22:50:17 | INFO | __main__ | --------------------------------------------------
+2026-03-23 22:53:10 | INFO | __main__ | Arena passed (1.000 > 0.550). Updating best policy.
+2026-03-23 22:53:10 | INFO | __main__ | Iteration [150]
+2026-03-23 22:53:10 | INFO | __main__ | --------------------------------------------------
+2026-03-23 22:53:10 | INFO | __main__ | [Arena]   Current vs Best: Winrate 100.0% (95% Wilson CI: 79.6%–100.0%) | Result: UPDATE BEST!
+2026-03-23 22:53:10 | INFO | __main__ | [Monitor] Current vs Pure MCTS: Winrate 86.7% (95% Wilson CI: 62.1%–96.3%) | Trend: Flat
+2026-03-23 22:53:10 | INFO | __main__ | [Stats]   Avg Game Length: 12.3 steps | Loss: 3.0399 | Entropy: 2.5109
+2026-03-23 22:53:10 | INFO | __main__ | --------------------------------------------------
+2026-03-23 22:55:45 | INFO | __main__ | Arena passed (1.000 > 0.550). Updating best policy.
+2026-03-23 22:55:45 | INFO | __main__ | Iteration [200]
+2026-03-23 22:55:45 | INFO | __main__ | --------------------------------------------------
+2026-03-23 22:55:45 | INFO | __main__ | [Arena]   Current vs Best: Winrate 100.0% (95% Wilson CI: 79.6%–100.0%) | Result: UPDATE BEST!
+2026-03-23 22:55:45 | INFO | __main__ | [Monitor] Current vs Pure MCTS: Winrate 86.7% (95% Wilson CI: 62.1%–96.3%) | Trend: Increasing
+2026-03-23 22:55:45 | INFO | __main__ | [Stats]   Avg Game Length: 11.8 steps | Loss: 2.7543 | Entropy: 2.2378
+2026-03-23 22:55:45 | INFO | __main__ | --------------------------------------------------
+2026-03-23 22:58:36 | INFO | __main__ | Iteration [250]
+2026-03-23 22:58:36 | INFO | __main__ | --------------------------------------------------
+2026-03-23 22:58:36 | INFO | __main__ | [Arena]   Current vs Best: Winrate 46.7% (95% Wilson CI: 24.8%–69.9%) | Result: keep best
+2026-03-23 22:58:36 | INFO | __main__ | [Monitor] Current vs Pure MCTS: Winrate 93.3% (95% Wilson CI: 70.2%–98.8%) | Trend: Increasing
+2026-03-23 22:58:36 | INFO | __main__ | [Stats]   Avg Game Length: 10.9 steps | Loss: 2.5222 | Entropy: 1.9422
+2026-03-23 22:58:36 | INFO | __main__ | --------------------------------------------------
+2026-03-23 23:01:12 | INFO | __main__ | Arena passed (1.000 > 0.550). Updating best policy.
+2026-03-23 23:01:12 | INFO | __main__ | Iteration [300]
+2026-03-23 23:01:12 | INFO | __main__ | --------------------------------------------------
+2026-03-23 23:01:12 | INFO | __main__ | [Arena]   Current vs Best: Winrate 100.0% (95% Wilson CI: 79.6%–100.0%) | Result: UPDATE BEST!
+2026-03-23 23:01:12 | INFO | __main__ | [Monitor] Current vs Pure MCTS: Winrate 86.7% (95% Wilson CI: 62.1%–96.3%) | Trend: Increasing
+2026-03-23 23:01:12 | INFO | __main__ | [Stats]   Avg Game Length: 10.4 steps | Loss: 2.3535 | Entropy: 1.8632
+2026-03-23 23:01:12 | INFO | __main__ | --------------------------------------------------
+2026-03-23 23:03:45 | INFO | __main__ | Arena passed (1.000 > 0.550). Updating best policy.
+2026-03-23 23:03:45 | INFO | __main__ | Iteration [350]
+2026-03-23 23:03:45 | INFO | __main__ | --------------------------------------------------
+2026-03-23 23:03:45 | INFO | __main__ | [Arena]   Current vs Best: Winrate 100.0% (95% Wilson CI: 79.6%–100.0%) | Result: UPDATE BEST!
+2026-03-23 23:03:45 | INFO | __main__ | [Monitor] Current vs Pure MCTS: Winrate 80.0% (95% Wilson CI: 54.8%–93.0%) | Trend: Increasing
+2026-03-23 23:03:45 | INFO | __main__ | [Stats]   Avg Game Length: 9.8 steps | Loss: 2.2748 | Entropy: 1.7160
+2026-03-23 23:03:45 | INFO | __main__ | --------------------------------------------------
+2026-03-23 23:06:40 | INFO | __main__ | Iteration [400]
+2026-03-23 23:06:40 | INFO | __main__ | --------------------------------------------------
+2026-03-23 23:06:40 | INFO | __main__ | [Arena]   Current vs Best: Winrate 53.3% (95% Wilson CI: 30.1%–75.2%) | Result: keep best
+2026-03-23 23:06:40 | INFO | __main__ | [Monitor] Current vs Pure MCTS: Winrate 93.3% (95% Wilson CI: 70.2%–98.8%) | Trend: Decreasing
+2026-03-23 23:06:40 | INFO | __main__ | [Stats]   Avg Game Length: 9.7 steps | Loss: 2.1909 | Entropy: 1.6613
+2026-03-23 23:06:40 | INFO | __main__ | --------------------------------------------------
+2026-03-23 23:09:15 | INFO | __main__ | Iteration [450]
+2026-03-23 23:09:15 | INFO | __main__ | --------------------------------------------------
+2026-03-23 23:09:15 | INFO | __main__ | [Arena]   Current vs Best: Winrate 53.3% (95% Wilson CI: 30.1%–75.2%) | Result: keep best
+2026-03-23 23:09:15 | INFO | __main__ | [Monitor] Current vs Pure MCTS: Winrate 93.3% (95% Wilson CI: 70.2%–98.8%) | Trend: Flat
+2026-03-23 23:09:15 | INFO | __main__ | [Stats]   Avg Game Length: 9.4 steps | Loss: 2.2143 | Entropy: 1.6703
+2026-03-23 23:09:15 | INFO | __main__ | --------------------------------------------------
+2026-03-23 23:12:09 | INFO | __main__ | Iteration [500]
+2026-03-23 23:12:09 | INFO | __main__ | --------------------------------------------------
+2026-03-23 23:12:09 | INFO | __main__ | [Arena]   Current vs Best: Winrate 53.3% (95% Wilson CI: 30.1%–75.2%) | Result: keep best
+2026-03-23 23:12:09 | INFO | __main__ | [Monitor] Current vs Pure MCTS: Winrate 100.0% (95% Wilson CI: 79.6%–100.0%) | Trend: Increasing
+2026-03-23 23:12:09 | INFO | __main__ | [Stats]   Avg Game Length: 9.3 steps | Loss: 2.0666 | Entropy: 1.5903
+2026-03-23 23:12:09 | INFO | __main__ | --------------------------------------------------

@@ -1,7 +1,7 @@
 *.pyc
 __pycache__/
 .vscode/
-checkpoints/
-logs/
+# checkpoints/
+# logs/
 # runs/
 # *.pth
