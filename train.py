@@ -139,8 +139,8 @@ class TrainPipeline():
         self.play_batch_size = self.self_play_workers
         self.epochs = 5  # num of train_steps for each update
         self.kl_targ = 0.02
-        self.check_freq = 15 
-        self.game_batch_num = 150 #1600/16 = 100; 1600 games only need 100 iterations to train if workers are 16.
+        self.check_freq = 5 
+        self.game_batch_num = 60 #1600/16 = 100; 1600 games only need 100 iterations to train if workers are 16.
         
         # Evaluation / arena settings
         self.eval_games = 15  # number of games per evaluation
@@ -286,20 +286,46 @@ class TrainPipeline():
 
     def collect_selfplay_data(self, n_games=1):
         """collect self-play data for training"""
+        buf_before = len(self.data_buffer)
+        t_batch = time.time()
+
         if self.self_play_workers == 1:
-            for _i in range(n_games):
+            logger.info(
+                "[Self-play] dispatch | games=%s | workers=1",
+                n_games,
+            )
+            for idx in range(n_games):
                 _winner, play_data = self.game.start_self_play(
                     self.mcts_player, temp=self.temp
                 )
                 play_data = list(play_data)[:]
                 self.episode_len = len(play_data)
                 self.episode_lens.append(self.episode_len)
+                logger.info(
+                    "[Self-play] collected %s/%s | moves=%s",
+                    idx + 1,
+                    n_games,
+                    self.episode_len,
+                )
                 play_data = self.get_equi_data(play_data)
                 self.data_buffer.extend(play_data)
+            buffer_added = len(self.data_buffer) - buf_before
+            logger.info(
+                "[Self-play] batch done | duration=%.1fs | buffer_added=%s | buffer=%s/%s",
+                time.time() - t_batch,
+                buffer_added,
+                len(self.data_buffer),
+                self.buffer_size,
+            )
             return
 
         self.policy_value_net.save_model(self.current_policy_path)
         model_abs = os.path.abspath(self.current_policy_path)
+        logger.info(
+            "[Self-play] dispatch | games=%s | workers=%s",
+            n_games,
+            self.self_play_workers,
+        )
 
         base_seed = random.randint(0, 2**31 - 1)
         arg_lists = [
@@ -318,14 +344,30 @@ class TrainPipeline():
         # With play_batch_size == self.self_play_workers, n_games equals self.self_play_workers here.
         # max_workers = min(self.self_play_workers, n_games)
         max_workers = self.self_play_workers
+        collected = 0
         with ProcessPoolExecutor(max_workers=max_workers) as ex:
             futures = [ex.submit(_selfplay_worker, a) for a in arg_lists]
             for fut in as_completed(futures):
                 play_data = fut.result()
                 self.episode_len = len(play_data)
                 self.episode_lens.append(self.episode_len)
+                collected += 1
+                logger.info(
+                    "[Self-play] collected %s/%s | moves=%s",
+                    collected,
+                    n_games,
+                    self.episode_len,
+                )
                 play_data = self.get_equi_data(play_data)
                 self.data_buffer.extend(play_data)
+        buffer_added = len(self.data_buffer) - buf_before
+        logger.info(
+            "[Self-play] batch done | duration=%.1fs | buffer_added=%s | buffer=%s/%s",
+            time.time() - t_batch,
+            buffer_added,
+            len(self.data_buffer),
+            self.buffer_size,
+        )
 
     def policy_update(self):
         """update the policy-value net"""
@@ -475,6 +517,12 @@ class TrainPipeline():
         try:
             for i in range(self.start_batch, self.game_batch_num):
                 last_batch_i = i + 1
+                logger.info(
+                    "game_batch %s/%s | collect_selfplay_data (%s games)",
+                    i + 1,
+                    self.game_batch_num,
+                    self.play_batch_size,
+                )
                 self.collect_selfplay_data(self.play_batch_size)
                 self._metrics.write(
                     {
@@ -506,6 +554,20 @@ class TrainPipeline():
                 )
                 if len(self.data_buffer) > self.batch_size:
                     loss, entropy, policy_loss, value_loss = self.policy_update()
+                    kl_s = (
+                        "{:.4f}".format(self.last_kl)
+                        if self.last_kl is not None
+                        else "N/A"
+                    )
+                    logger.info(
+                        "[Train] update | loss=%.4f | entropy=%.4f | kl=%s | lr=%.2e | lr_mult=%.2f | global_step=%s",
+                        loss,
+                        entropy,
+                        kl_s,
+                        self.policy_value_net.current_lr(),
+                        self.lr_multiplier,
+                        self.global_step,
+                    )
                     self._metrics.write(
                         {
                             "timestamp": time.time(),
@@ -533,6 +595,12 @@ class TrainPipeline():
                             "temp": self.temp,
                             "device": run_device,
                         }
+                    )
+                else:
+                    logger.info(
+                        "[Train] skip | need buffer>%s | current=%s",
+                        self.batch_size,
+                        len(self.data_buffer),
                     )
                 # check the performance of the current model and save the model params
                 if (i+1) % self.check_freq == 0:
