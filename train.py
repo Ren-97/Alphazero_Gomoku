@@ -139,8 +139,8 @@ class TrainPipeline():
         self.play_batch_size = self.self_play_workers
         self.epochs = 5  # num of train_steps for each update
         self.kl_targ = 0.02
-        self.check_freq = 5 
-        self.game_batch_num = 60 #1600/16 = 100; 1600 games only need 100 iterations to train if workers are 16.
+        self.check_freq = 50 
+        self.game_batch_num = 500 #1600
         
         # Evaluation / arena settings
         self.eval_games = 15  # number of games per evaluation
