@@ -2,6 +2,8 @@
 An implementation of the training pipeline of AlphaZero for Gomoku
 """
 
+from __future__ import annotations
+
 import logging
 import os
 import random
@@ -110,9 +112,9 @@ def _archive_and_clear_outputs(*, archive_root: str = "runs") -> str:
 class TrainPipeline():
     def __init__(self, use_gpu: bool | None = None, self_play_workers: int = 1):
         # params of the board and the game
-        self.board_width = 6
-        self.board_height = 6
-        self.n_in_row = 4
+        self.board_width = 8
+        self.board_height = 8
+        self.n_in_row = 5
         self.current_policy_path = "./current_policy_{}_{}_{}.pth".format(
             self.board_width, self.board_height, self.n_in_row
         )
@@ -128,7 +130,7 @@ class TrainPipeline():
         self.learn_rate = 2e-3
         self.lr_multiplier = 1.0  # adaptively adjust the learning rate based on KL
         self.temp = 1.0  # the temperature param
-        self.n_playout = 200  #400 # num of simulations for each move
+        self.n_playout = 400  # num of simulations for each move
         self.c_puct = 5 # Exploration Coefficient (PUCT:Predictor + Upper Confidence Bound applied to Trees)
         self.buffer_size = 10000
         self.batch_size = 512  # mini-batch size for training
@@ -140,10 +142,10 @@ class TrainPipeline():
         self.epochs = 5  # num of train_steps for each update
         self.kl_targ = 0.02
         self.check_freq = 50 
-        self.game_batch_num = 500 #1600
+        self.game_batch_num = 1500
         
         # Evaluation / arena settings
-        self.eval_games = 15  # number of games per evaluation
+        self.eval_games = 20  # number of games per evaluation
         self.arena_update_threshold = 0.55  # current beats best if winrate > threshold
         self.global_step = 0
         self.start_batch = 0
@@ -156,7 +158,7 @@ class TrainPipeline():
         self.best_checkpoint_path = os.path.join(self.checkpoint_dir, "best.pth")
 
         # num of simulations used for the pure mcts, which is used as the opponent to evaluate the trained policy
-        self.pure_mcts_playout_num = 600 # 1000
+        self.pure_mcts_playout_num = 1000
 
         # Rolling stats for logging/monitoring
         self.episode_lens = deque(maxlen=200)
