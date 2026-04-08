@@ -1,7 +1,6 @@
 """
-Exp 1: AZ vs Pure MCTS — edit the constants below, then run:
+Exp 1: AZ vs Pure MCTS 
     python experiments/exp1_search_compression.py
-Writes table to console + CSV + PNG under experiments/outputs/exp1/.
 """
 
 import csv
@@ -10,15 +9,15 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 
-from helpers import BOARD_HEIGHT, BOARD_WIDTH, C_PUCT, N_IN_ROW, ROOT, az_vs_pure_win_rate, load_policy
+from helpers import board_height, board_width, c_puct, n_in_row, root, az_vs_pure_win_rate, load_policy
 
-OUT_DIR = Path(__file__).resolve().parent / "outputs" / "exp1"
+out_dir = Path(__file__).resolve().parent / "outputs" / "exp1"
 
-MODEL = ROOT / "current_policy_8_8_5.pth"
-N_AZ = 20
-N_PURE_LIST = [400, 800, 1600, 2000]
-N_GAMES = 24
-USE_GPU = False
+model = root / "current_policy_8_8_5.pth"
+n_az = 20
+n_pure_list = [400, 800, 1600, 2000]
+n_games = 20
+use_gpu = False
 
 
 def wilson_ci(p: float, n: int, z: float = 1.96) -> tuple[float, float]:
@@ -34,18 +33,18 @@ def wilson_ci(p: float, n: int, z: float = 1.96) -> tuple[float, float]:
 
 
 def main() -> None:
-    net = load_policy(MODEL, use_gpu=USE_GPU)
+    net = load_policy(model, use_gpu=use_gpu)
     rows: list[dict] = []
 
-    for n_pure in sorted(N_PURE_LIST):
+    for n_pure in sorted(n_pure_list):
         wr, counts = az_vs_pure_win_rate(
             net,
-            n_games=N_GAMES,
-            n_playout_az=N_AZ,
+            n_games=n_games,
+            n_playout_az=n_az,
             n_playout_pure=n_pure,
-            c_puct=C_PUCT,
+            c_puct=c_puct,
         )
-        lo, hi = wilson_ci(wr, N_GAMES)
+        lo, hi = wilson_ci(wr, n_games)
         rows.append(
             {
                 "N_pure": n_pure,
@@ -55,13 +54,13 @@ def main() -> None:
                 "AZ_wins": int(counts.get(1, 0)),
                 "Pure_wins": int(counts.get(2, 0)),
                 "Ties": int(counts.get(-1, 0)),
-                "N_pure_div_N_az": round(n_pure / N_AZ, 2),
+                "N_pure_div_N_az": round(n_pure / n_az, 2),
             }
         )
 
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    csv_path = OUT_DIR / "az_vs_pure_mcts.csv"
-    png_path = OUT_DIR / "az_vs_pure_mcts.png"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = out_dir / "az_vs_pure_mcts.csv"
+    png_path = out_dir / "az_vs_pure_mcts.png"
 
     keys = list(rows[0].keys())
     with csv_path.open("w", newline="", encoding="utf-8") as f:
@@ -86,7 +85,7 @@ def main() -> None:
     plt.close(fig)
 
     print("AZ vs Pure MCTS | P1=AZ | alternating start")
-    print(f"  model={MODEL}  board={BOARD_WIDTH}x{BOARD_HEIGHT}-{N_IN_ROW}  N_az={N_AZ}  games/row={N_GAMES}")
+    print(f"  model={model}  board={board_width}x{board_height}-{n_in_row}  N_az={n_az}  games/row={n_games}")
     print()
     hdr = f"{'N_pure':>7} {'WinRate':>9} {'Wilson95':^17} {'AZ':>4} {'Pu':>4} {'Dr':>4} {'ratio':>7}"
     print(hdr)
@@ -97,9 +96,6 @@ def main() -> None:
             f"{r['N_pure']:>7} {r['WinRate_AZ']:>9.4f} {w:^17} "
             f"{r['AZ_wins']:>4} {r['Pure_wins']:>4} {r['Ties']:>4} {r['N_pure_div_N_az']:>7.2f}"
         )
-    print()
-    print(csv_path)
-    print(png_path)
 
 
 if __name__ == "__main__":

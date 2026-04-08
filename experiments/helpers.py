@@ -7,25 +7,25 @@ from pathlib import Path
 import numpy as np
 import torch
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+root = Path(__file__).resolve().parent.parent
+if str(root) not in sys.path:
+    sys.path.insert(0, str(root))
 
 from game import Board, Game
 from mcts_alphaZero import MCTSPlayer
 from mcts_pure import MCTSPlayer as MCTS_Pure
 from policy_value_net import PolicyValueNet
 
-BOARD_WIDTH = 8
-BOARD_HEIGHT = 8
-N_IN_ROW = 5
-C_PUCT = 5
+board_width = 8
+board_height = 8
+n_in_row = 5
+c_puct = 5
 
 
 def make_game(
-    width: int = BOARD_WIDTH,
-    height: int = BOARD_HEIGHT,
-    n_in_row: int = N_IN_ROW,
+    width: int = board_width,
+    height: int = board_height,
+    n_in_row: int = n_in_row,
 ) -> tuple[Board, Game]:
     board = Board(width=width, height=height, n_in_row=n_in_row)
     return board, Game(board)
@@ -36,10 +36,10 @@ def load_policy(model_path, use_gpu=False):
     path = Path(model_path)
     if not path.is_file():
         raise FileNotFoundError(f"No model at {path}")
-    return PolicyValueNet(BOARD_WIDTH, BOARD_HEIGHT, model_file=str(path), use_gpu=use_gpu)
+    return PolicyValueNet(board_width, board_height, model_file=str(path), use_gpu=use_gpu)
 
 
-def az_vs_pure_win_rate(net, n_games, n_playout_az, n_playout_pure, c_puct=C_PUCT):
+def az_vs_pure_win_rate(net, n_games, n_playout_az, n_playout_pure, c_puct=c_puct):
     """
     AZ (player 1) vs Pure MCTS (player 2). Same protocol as train._evaluate_current_vs_pure.
     Win rate = (wins for player 1 + 0.5 * ties) / n_games.

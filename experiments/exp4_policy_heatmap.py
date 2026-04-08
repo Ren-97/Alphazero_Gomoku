@@ -9,11 +9,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from helpers import (
-    BOARD_HEIGHT,
-    BOARD_WIDTH,
     Board,
-    N_IN_ROW,
+    board_height,
+    board_width,
     load_policy,
+    n_in_row,
     policy_matrix_from_board,
 )
 
@@ -45,7 +45,7 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     net = load_policy(args.model, use_gpu=args.gpu)
-    board = Board(width=BOARD_WIDTH, height=BOARD_HEIGHT, n_in_row=N_IN_ROW)
+    board = Board(width=board_width, height=board_height, n_in_row=n_in_row)
     moves = []
     if args.moves.strip():
         moves = [int(x.strip()) for x in args.moves.split(",") if x.strip()]
