@@ -15,6 +15,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import torch
+import numpy as np
 
 root = Path(__file__).resolve().parent.parent
 if str(root) not in sys.path:
@@ -23,11 +24,11 @@ if str(root) not in sys.path:
 from train import TrainPipeline
 
 workers = [1, 4, 8, 16]
-iterations = 100
-eval_every = 5
-eval_games = 20
-seed = 0
-use_gpu = None
+iterations = 300
+eval_every = 10
+eval_games = 50
+seed = 123
+use_gpu = True
 out_dir = Path(__file__).resolve().parent / "outputs" / "exp3"
 
 
@@ -53,8 +54,6 @@ class Exp3Train(TrainPipeline):
 
 
 def _set_seed(seed: int) -> None:
-    import numpy as np
-
     random.seed(seed)
     np.random.seed(seed % (2**32))
     torch.manual_seed(seed % (2**32))
@@ -73,11 +72,18 @@ def run_branch(pipe: Exp3Train, workers: int, eval_every: int, eval_games: int) 
         if (i + 1) % eval_every == 0:
             wr, _ = pipe._evaluate_current_vs_pure(eval_games)
             base_s = f"{wr:.6f}"
+        wall_s = round(time.perf_counter() - t0, 2)
+        msg = f"[w={workers}] iter {i + 1}/{pipe.game_batch_num}  wall_s={wall_s}"
+        if loss_s:
+            msg += f"  loss={loss_s}"
+        if base_s:
+            msg += f"  wr_vs_pure={base_s}"
+        print(msg)
         rows.append(
             {
                 "iteration": i + 1,
                 "workers": workers,
-                "wall_s": round(time.perf_counter() - t0, 2),
+                "wall_s": wall_s,
                 "loss": loss_s,
                 "baseline_vs_pure": base_s,
             }
@@ -123,7 +129,7 @@ def _plot_winrate_iter(path: Path, rows: list[dict]) -> None:
         ax.plot([p[0] for p in pts], [p[1] for p in pts], "o-", label=f"w={w}", ms=3)
     ax.axhline(0.5, color="gray", ls="--", lw=1)
     ax.set_xlabel("iteration")
-    ax.set_ylabel("win rate vs Pure MCTS (AZ as P1)")
+    ax.set_ylabel("win rate vs Pure MCTS")
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
     fig.tight_layout()

@@ -1,0 +1,1 @@
+timestamp,phase,iteration,global_step,episode_len,buffer_size,loss,policy_loss,value_loss,entropy,kl,lr,lr_multiplier,arena_winrate,baseline_winrate,updated_best,eval_games,board_w,board_h,n_in_row,n_playout,c_puct,temp,device
