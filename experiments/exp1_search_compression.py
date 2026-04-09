@@ -17,7 +17,7 @@ out_dir = Path(__file__).resolve().parent / "outputs" / "exp1"
 model = root / "results/best_policy_8_8_5.pth"
 n_az = 20
 n_pure_list = [400, 800, 1600, 2000, 4000, 6000, 8000]
-n_games = 30
+n_games = 100
 use_gpu = True
 log_games = True
 
