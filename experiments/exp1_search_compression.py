@@ -1,5 +1,6 @@
 """
 Exp 1: AZ vs Pure MCTS 
+
     python experiments/exp1_search_compression.py
 """
 
@@ -13,11 +14,12 @@ from helpers import board_height, board_width, c_puct, n_in_row, root, az_vs_pur
 
 out_dir = Path(__file__).resolve().parent / "outputs" / "exp1"
 
-model = root / "current_policy_8_8_5.pth"
+model = root / "results/best_policy_8_8_5.pth"
 n_az = 20
-n_pure_list = [400, 800, 1600, 2000]
-n_games = 20
-use_gpu = False
+n_pure_list = [400, 800, 1600, 2000, 4000, 6000, 8000]
+n_games = 30
+use_gpu = True
+log_games = True
 
 
 def wilson_ci(p: float, n: int, z: float = 1.96) -> tuple[float, float]:
@@ -43,6 +45,7 @@ def main() -> None:
             n_playout_az=n_az,
             n_playout_pure=n_pure,
             c_puct=c_puct,
+            verbose=log_games,
         )
         lo, hi = wilson_ci(wr, n_games)
         rows.append(

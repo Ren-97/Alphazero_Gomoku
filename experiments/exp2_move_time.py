@@ -1,5 +1,7 @@
 """
-Exp 2: wall-clock per move for AZ vs Pure at chosen playout counts.
+Exp 2: Wall-clock time per move for AZ vs Pure at chosen playout counts.
+
+    python experiments/exp2_move_time.py
 """
 
 import argparse
@@ -18,10 +20,10 @@ from helpers import (
     root,
 )
 
-model = root / "current_policy_8_8_5.pth"
-n_games = 10
+model = root / "results/best_policy_8_8_5.pth"
+n_games = 2
 n_az = 20
-n_pure = 800
+n_pure = 5000
 use_gpu = False
 
 
@@ -70,9 +72,11 @@ def main() -> None:
 
     print(f"board={board_width}x{board_height} connect-{n_in_row}")
     print(f"AZ n_playout={args.n_az} | Pure n_playout={args.n_pure} | games={args.games}")
-    print(f"ratio (Pure/AZ) = {args.n_pure / args.n_az:.2f}")
     summarize("AZ (all moves by the neural MCTS player)", az_timed.latencies)
     summarize("Pure MCTS (all moves by the rollout player)", pure_timed.latencies)
+    
+    r = statistics.mean(pure_timed.latencies) / statistics.mean(az_timed.latencies)
+    print(f"ratio (Pure/AZ wall time per move, mean) = {r:.2f}")
 
 
 if __name__ == "__main__":

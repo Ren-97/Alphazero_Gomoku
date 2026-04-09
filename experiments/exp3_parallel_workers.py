@@ -1,6 +1,8 @@
 """
-Exp 3: from random init, same outer iterations per worker; log loss + periodic AZ vs Pure.
-Outputs under experiments/outputs/exp3/. Edit constants below.
+Exp 3: Train from scratch (same seed, no checkpoint) with different self-play worker counts,
+and compare how fast / how well the model improves (e.g. loss, periodic AZ vs Pure).
+
+    python experiments/exp3_parallel_workers.py
 """
 
 from __future__ import annotations
