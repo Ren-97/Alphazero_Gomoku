@@ -1,7 +1,10 @@
 """
-Exp 3: Train from scratch (same seed, no checkpoint) with different self-play worker counts,
-and compare how fast / how well the model improves (e.g. loss, periodic AZ vs Pure).
+Exp 3: Train from scratch (same seed, no checkpoint) with different self-play worker counts;
+compare wall time and periodic AZ vs Pure win rate.
 
+Outputs: experiments/outputs/exp3/(CSV + PNGs).
+
+Run:
     python experiments/exp3_parallel_workers.py
 """
 
@@ -14,8 +17,8 @@ import time
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import torch
 import numpy as np
+import torch
 
 root = Path(__file__).resolve().parent.parent
 if str(root) not in sys.path:
@@ -23,6 +26,7 @@ if str(root) not in sys.path:
 
 from train import TrainPipeline
 
+# --- experiment knobs ---
 workers = [1, 4, 8, 16]
 iterations = 300
 eval_every = 10

@@ -1,6 +1,9 @@
 """
 Exp 1: AZ vs Pure MCTS 
 
+Outputs: experiments/outputs/exp1/(CSV + PNG)
+
+Run:
     python experiments/exp1_search_compression.py
 """
 
@@ -14,6 +17,7 @@ from helpers import board_height, board_width, c_puct, n_in_row, root, az_vs_pur
 
 out_dir = Path(__file__).resolve().parent / "outputs" / "exp1"
 
+# --- experiment knobs ---
 model = root / "results/best_policy_8_8_5.pth"
 n_az = 20
 n_pure_list = [400, 800, 1600, 2000, 4000, 6000, 8000]
@@ -77,7 +81,9 @@ def main() -> None:
     lo = [r["Wilson95_lo"] for r in rows]
     hi = [r["Wilson95_hi"] for r in rows]
     fig, ax = plt.subplots(figsize=(6, 4))
-    ax.errorbar(xs, ys, yerr=([ys[i] - lo[i] for i in range(len(rows))], [hi[i] - ys[i] for i in range(len(rows))]), fmt="o-", capsize=4)
+    yerr_lo = [ys[i] - lo[i] for i in range(len(rows))]
+    yerr_hi = [hi[i] - ys[i] for i in range(len(rows))]
+    ax.errorbar(xs, ys, yerr=(yerr_lo, yerr_hi), fmt="o-", capsize=4)
     ax.axhline(0.5, color="gray", linestyle="--", linewidth=1)
     ax.set_xlabel("Pure MCTS N (simulations / move)")
     ax.set_ylabel("AZ win rate (P1)")

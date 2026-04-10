@@ -1,25 +1,16 @@
 """
 Exp 2: Wall-clock time per move for AZ vs Pure at chosen playout counts.
 
+Run:
     python experiments/exp2_move_time.py
 """
 
 import argparse
 import statistics
 
-from helpers import (
-    MCTSPlayer,
-    MCTS_Pure,
-    TimedPlayer,
-    board_height,
-    board_width,
-    c_puct,
-    load_policy,
-    make_game,
-    n_in_row,
-    root,
-)
+from helpers import MCTSPlayer, MCTS_Pure, TimedPlayer, board_height, board_width, c_puct, load_policy, make_game, n_in_row, root
 
+# --- experiment knobs ---
 model = root / "results/best_policy_8_8_5.pth"
 n_games = 2
 n_az = 20

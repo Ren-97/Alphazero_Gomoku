@@ -109,12 +109,10 @@ class TimedPlayer:
         return move
 
 
-def policy_matrix_from_board(
-    net: PolicyValueNet,
-    board: Board,
-) -> np.ndarray:
+def policy_matrix_from_board(net: PolicyValueNet, board: Board) -> np.ndarray:
     """Full board (height, width) neural policy mass; illegal moves may still carry mass."""
-    state = board.current_state().reshape(-1, 4, board.width, board.height)
+    # policy_value stacks batch with np.asarray; each element must be (4, H, W).
+    state = np.ascontiguousarray(board.current_state(), dtype=np.float32)
     probs, _ = net.policy_value([state])
     flat = probs[0]
     h, w = board.height, board.width
