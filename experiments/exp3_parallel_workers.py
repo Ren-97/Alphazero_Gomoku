@@ -32,7 +32,7 @@ iterations = 300
 eval_every = 10
 eval_games = 50
 seed = 123
-use_gpu = True
+use_gpu = False
 out_dir = Path(__file__).resolve().parent / "outputs" / "exp3"
 
 
